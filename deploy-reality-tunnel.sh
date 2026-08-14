@@ -446,21 +446,14 @@ cmd_relay() {
     chmod 600 "$RELAY_SSPASS"
   fi
 
-  # 入站协议:条目级(每条末尾标 ss/socks,默认 ss,可混合);SOCKS 认证全局一次
+  # SOCKS5 入站认证:读已有;没有则等添加 socks 条目时设置;生成配置前兜底
   SOCKS_UAUTH=""
   if [ -f "$CFG_DIR/relay.socksauth" ]; then
     SOCKS_UAUTH=$(cat "$CFG_DIR/relay.socksauth")
-  elif [ -f "$RELAY_ENTRIES" ] && grep -qE ' socks$' "$RELAY_ENTRIES" || [ "${2:-}" = "socks" ]; then
-    local su sp
-    su=$(prompt "  SOCKS5 入站用户名(可选,回车=无认证)" "")
-    if [ -n "$su" ]; then
-      sp=$(prompt "  SOCKS5 入站密码" "")
-      SOCKS_UAUTH="$su $sp"
-    fi
-    echo -n "$SOCKS_UAUTH" > "$CFG_DIR/relay.socksauth"
-    chmod 600 "$CFG_DIR/relay.socksauth"
+    SOCKS_USER=${SOCKS_UAUTH%% *}
+    SOCKS_PASS=${SOCKS_UAUTH#* }
+    c_yel "  [i] SOCKS5 入站认证: ${SOCKS_USER} / ${SOCKS_PASS}(存 ${CFG_DIR}/relay.socksauth)"
   fi
-  [ -n "$SOCKS_UAUTH" ] && c_yel "  [i] SOCKS5 入站认证: $(echo "$SOCKS_UAUTH" | cut -d' ' -f1) / ***(存 ${CFG_DIR}/relay.socksauth)"
 
   local add_more=0
   if [ -f "$RELAY_ENTRIES" ]; then
@@ -527,6 +520,23 @@ cmd_relay() {
     remark=$(prompt "  备注(可选)" "")
     proto=$(prompt "  本条协议(回车=SS / 输入socks=SOCKS5)" "ss")
     case "$proto" in socks|SOCKS|s5|S5) proto=socks ;; *) proto=ss ;; esac
+    if [ "$proto" = "socks" ] && [ ! -f "$CFG_DIR/relay.socksauth" ]; then
+      local su sp
+      read -rp "  SOCKS5 入站用户名(回车=自动生成): " su
+      if [ -n "$su" ]; then
+        read -rp "  SOCKS5 入站密码(回车=自动生成): " sp
+        [ -n "$sp" ] || sp=$(openssl rand -hex 12)
+      else
+        su="socks$(openssl rand -hex 3)"
+        sp=$(openssl rand -hex 12)
+      fi
+      SOCKS_UAUTH="$su $sp"
+      SOCKS_USER=$su
+      SOCKS_PASS=$sp
+      echo -n "$SOCKS_UAUTH" > "$CFG_DIR/relay.socksauth"
+      chmod 600 "$CFG_DIR/relay.socksauth"
+      c_grn "  ✓ SOCKS5 入站认证已设置: ${SOCKS_USER} / ${SOCKS_PASS}"
+    fi
     echo "${SS_PORT} ${ip} ${uport} ${uuid} ${pub} ${sid} ${sni} ${remark} ${proto}" >> "$RELAY_ENTRIES"
     SS_PORT=$((SS_PORT + 1))
     c_grn "  ✓ 已添加 ${ip}:${uport} [${proto}]"
@@ -534,6 +544,23 @@ cmd_relay() {
   fi
 
   [ -s "$RELAY_ENTRIES" ] || { c_red "[!] 没有有效条目,退出"; exit 1; }
+
+  # 兜底:存在 socks 条目却没认证文件(例如手动编辑过 entries)
+  if [ -z "$SOCKS_UAUTH" ] && grep -qE ' socks$' "$RELAY_ENTRIES" 2>/dev/null; then
+    local su sp
+    read -rp "  [!] 检测到 SOCKS5 条目但未设认证:回车=自动生成(n=保持无认证): " _a
+    if [ "${_a,,}" != "n" ]; then
+      su="socks$(openssl rand -hex 3)"
+      sp=$(openssl rand -hex 12)
+      SOCKS_UAUTH="$su $sp"
+      SOCKS_USER=$su
+      SOCKS_PASS=$sp
+      echo -n "$SOCKS_UAUTH" > "$CFG_DIR/relay.socksauth"
+      chmod 600 "$CFG_DIR/relay.socksauth"
+      c_grn "  ✓ SOCKS5 认证已生成: ${SOCKS_USER} / ${SOCKS_PASS}"
+    fi
+  fi
+
   echo "[*] 生成配置..."
 
   SS_PASS="$SS_PASS" SOCKS_UAUTH="$SOCKS_UAUTH" \
@@ -606,9 +633,9 @@ PY
     fi
     if [ "$socks_n" -gt 0 ]; then
       if [ -n "$SOCKS_UAUTH" ]; then
-        c_grn "  SOCKS5 认证: $(echo "$SOCKS_UAUTH" | cut -d' ' -f1) / ***(存 ${CFG_DIR}/relay.socksauth);→ 应用按上面配置"
+        c_grn "  SOCKS5 认证: ${SOCKS_USER} / ${SOCKS_PASS}(存 ${CFG_DIR}/relay.socksauth);→ 应用填账号密码"
       else
-        c_grn "  SOCKS5 无认证(仅限内网);→ 应用按上面配置"
+        c_yel "  SOCKS5 无认证(仅限内网)——建议设认证(重跑 relay 或写 relay.socksauth)"
       fi
     fi
     c_grn "======================================================"
