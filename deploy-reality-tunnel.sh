@@ -258,13 +258,13 @@ cmd_server() {
     esac
   fi
 
-  if listening 443 && ! systemctl is-active --quiet "$SERVICE"; then
-    c_yel "[!] 443 已被占用: $(ss -lntup | grep ':443 ' | head -1)"
-    local p; p=$(prompt "改用端口" 443)
-    SRV_PORT=$p
-  else
-    SRV_PORT=$(prompt "Reality 监听端口" 443)
-  fi
+  SRV_PORT=$(prompt "Reality 监听端口" 443)
+  while listening "$SRV_PORT" && ! systemctl is-active --quiet "$SERVICE"; do
+    c_yel "[!] 端口 ${SRV_PORT} 已被占用: $(ss -lntup | grep -E "[:.]${SRV_PORT}\b" | head -1)"
+    read -rp "    输入新端口,或回车强制使用: " p2
+    [ -n "$p2" ] || break
+    SRV_PORT=$p2
+  done
   local sni
   sni=$(pick_sni)
   verify_sni "$sni"
@@ -283,6 +283,21 @@ cmd_server() {
       ;;
     both)
       SRV_SOCKS_PORT=$(prompt "SOCKS5 隧道监听端口(落地)" 8443)
+      while :; do
+        local p3
+        if [ "$SRV_SOCKS_PORT" = "$SRV_PORT" ]; then
+          c_red "  [!] SOCKS5 隧道端口不能与 SS 隧道端口(${SRV_PORT})相同"
+          read -rp "    输入新端口: " p3
+          [ -n "$p3" ] || { c_red "  必须给一个不同端口"; p3=$SRV_SOCKS_PORT; }
+          SRV_SOCKS_PORT=$p3; continue
+        fi
+        if listening "$SRV_SOCKS_PORT" && ! systemctl is-active --quiet "$SERVICE"; then
+          c_yel "  [!] 端口 ${SRV_SOCKS_PORT} 已被占用: $(ss -lntup | grep -E "[:.]${SRV_SOCKS_PORT}\b" | head -1)"
+          read -rp "    输入新端口,或回车强制使用: " p3
+          if [ -n "$p3" ]; then SRV_SOCKS_PORT=$p3; continue; fi
+        fi
+        break
+      done
       SS_PORT=$(prompt "SS 隧道 → 本机 x-ui SS 端口" 8388)
       SS_PASS=$(prompt "SS 入站密码" "")
       [ -n "$SS_PASS" ] || { c_red "[!] SS 密码必填"; exit 1; }
@@ -484,7 +499,22 @@ cmd_relay() {
     fi
     first=0
     echo "----------------------------------------"
-    SS_PORT=$(prompt "  本地端口(daed 节点填这个端口)" "$SS_PORT")
+    while :; do
+      SS_PORT=$(prompt "  本地端口(daed 节点填这个端口)" "$SS_PORT")
+      local busy_port again
+      busy_port=$(ss -lntup 2>/dev/null | grep -E "[:.]${SS_PORT}\b" | head -1)
+      if [ -n "$busy_port" ]; then
+        c_yel "  [!] 端口 ${SS_PORT} 已被占用: $busy_port"
+        read -rp "    输入新端口,或回车强制使用: " again
+        if [ -n "$again" ]; then SS_PORT=$again; continue; fi
+      fi
+      if [ -s "$RELAY_ENTRIES" ] && grep -qE "^${SS_PORT} " "$RELAY_ENTRIES"; then
+        c_yel "  [!] 端口 ${SS_PORT} 已在现有条目中使用(启动会失败)"
+        read -rp "    输入新端口,或回车强制使用: " again
+        if [ -n "$again" ]; then SS_PORT=$again; continue; fi
+      fi
+      break
+    done
     local ip uport uuid pub sid remark
     ip=$(prompt "  落地IP(直接回车结束)" "")
     [ -n "$ip" ] || break
