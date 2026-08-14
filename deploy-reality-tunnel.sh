@@ -156,8 +156,8 @@ install_xray() {
   c_grn "    xray 安装完成: ${XRAY_BIN}"
 }
 
-listening() { # $1=端口. 端口被占用返回0
-  ss -lntup 2>/dev/null | grep -qE "[:.]${1}\b"
+listening() { # $1=端口. 端口被占用返回0(匹配 :端口+空格,避免 IP 段误报)
+  ss -lntup 2>/dev/null | grep -qE ":${1} "
 }
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ cmd_server() {
 
   SRV_PORT=$(prompt "Reality 监听端口" 443)
   while listening "$SRV_PORT" && ! systemctl is-active --quiet "$SERVICE"; do
-    c_yel "[!] 端口 ${SRV_PORT} 已被占用: $(ss -lntup | grep -E "[:.]${SRV_PORT}\b" | head -1)"
+    c_yel "[!] 端口 ${SRV_PORT} 已被占用: $(ss -lntup | grep -E ":${SRV_PORT} " | head -1)"
     read -rp "    输入新端口,或回车强制使用: " p2
     [ -n "$p2" ] || break
     SRV_PORT=$p2
@@ -292,7 +292,7 @@ cmd_server() {
           SRV_SOCKS_PORT=$p3; continue
         fi
         if listening "$SRV_SOCKS_PORT" && ! systemctl is-active --quiet "$SERVICE"; then
-          c_yel "  [!] 端口 ${SRV_SOCKS_PORT} 已被占用: $(ss -lntup | grep -E "[:.]${SRV_SOCKS_PORT}\b" | head -1)"
+          c_yel "  [!] 端口 ${SRV_SOCKS_PORT} 已被占用: $(ss -lntup | grep -E ":${SRV_SOCKS_PORT} " | head -1)"
           read -rp "    输入新端口,或回车强制使用: " p3
           if [ -n "$p3" ]; then SRV_SOCKS_PORT=$p3; continue; fi
         fi
@@ -502,7 +502,7 @@ cmd_relay() {
     while :; do
       SS_PORT=$(prompt "  本地端口(daed 节点填这个端口)" "$SS_PORT")
       local busy_port again
-      busy_port=$(ss -lntup 2>/dev/null | grep -E "[:.]${SS_PORT}\b" | head -1)
+      busy_port=$(ss -lntup 2>/dev/null | grep -E ":${SS_PORT} " | head -1)
       if [ -n "$busy_port" ]; then
         c_yel "  [!] 端口 ${SS_PORT} 已被占用: $busy_port"
         read -rp "    输入新端口,或回车强制使用: " again
